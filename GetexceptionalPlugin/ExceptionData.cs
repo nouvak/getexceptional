@@ -6,6 +6,8 @@ using System.Security;
 using System.Collections.Specialized;
 using System.Web;
 using System.Web.SessionState;
+using System.IO;
+using Newtonsoft.Json;
 
 namespace GetexceptionalPlugin
 {
@@ -37,7 +39,8 @@ namespace GetexceptionalPlugin
         {
             get
             {
-                if (null == exception) return null;
+                if (exception == null)
+                    return null;
                 return exception.GetType().ToString();
             }
         }
@@ -181,71 +184,28 @@ namespace GetexceptionalPlugin
 
         public string ToJson()
         {
-            return @"
-                    {
-                       ""request"": {
-                           ""session"": {
-                               ""session_variable_1"": ""Session 1 Variable Value"",
-                               ""session_variable_2"": ""Session 2 Variable Value"",
-                           },
-                           ""remote_ip"": ""127.0.0.1"",
-                           ""parameters"": {
-                               ""action"": ""gonuts"",
-                               ""controller"": ""spike""
-                           },
-                           ""action"": ""gonuts"",
-                           ""url"": ""http://localhost/spike/gonuts"",
-                           ""request_method"": ""get"",
-                           ""controller"": ""SpikeController"",
-                           ""headers"": {
-                               ""Version"": ""HTTP/1.1"",
-                               ""User-Agent"": ""Mozilla/5.0"",
-                               ""Accept-Encoding"": ""gzip,deflate"",
-                               ""Keep-Alive"": ""300"",
-                               ""Accept"": ""text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"",
-                               ""Accept-Charset"": ""ISO-8859-1,utf-8;q=0.7,*;q=0.7"",
-                               ""Accept-Language"": ""en-us,en;q=0.5"",
-                               ""Connection"": ""keep-alive"",
-                               ""Host"": ""myapp.com""
-                           }
-                       },
-                       ""application_environment"": {
-                           ""framework"": ""rails"",
-                           ""env"": {
-                               ""MANPATH"": ""/usr/local/git/man:/opt/local/share/man"",
-                               ""SHELL"": ""/bin/bash"",
-                               ""DISPLAY"": ""/tmp/launch-SYxDj8/:0"",
-                               ""CVSEDITOR"": ""mate -w"",
-                               ""LANG"": ""en_IE.UTF-8"",
-                               ""PWD"": ""/var/www/myapp"",
-                               ""PATH"": ""/opt/local/bin:/usr/local/git/bin:/opt/local/bin"",
-                           },
-                           ""language"": ""ruby"",
-                           ""language_version"": ""1.8.7 p72 2008-08-11 i686-darwin9"",
-                           ""application_root_directory"": ""/var/www/myapp""
-                       },
-                       ""exception"": {
-                           ""occurred_at"": ""2010-10-29T10:48:54+01:00"",
-                           ""message"": ""NoMethodError: undefined method `horse!' for nil:NilClass"",
-                           ""backtrace"": [
-                               ""/Users/wal/work/myapp/app/controllers/spike_controller.rb:16:in `gonuts'"", 
-                               ""/actionpack-2.3.2/lib/action_controller/base.rb:1322:in `send'"", 
-                               ""/actionpack-2.3.2/lib/action_controller/base.rb:1322:in `perform_action_without_filters'"",
-                               ""/actionpack-2.3.2/lib/action_controller/filters.rb:617:in `call_filters'"",
-                               ""/actionpack-2.3.2/lib/action_controller/filters.rb:610:in `perform_action_without_benchmark'"",
-                               ""/actionpack-2.3.2/lib/action_controller/benchmarking.rb:68:in `perform_action_without_rescue'"",
-                               ""/activesupport-2.3.2/lib/active_support/core_ext/benchmark.rb:17:in `ms'"", 
-                               ""/ruby/1.8/benchmark.rb:308:in `realtime'"", 
-                               ""/ruby/gems/1.8/gems/activesupport-2.3.2/lib/active_support/core_ext/benchmark.rb:17:in `ms'""],
-                           ""exception_class"": ""RuntimeError""
-                       },
-                       ""client"": {
-                           ""name"": ""getexceptional-rails-plugin"",
-                           ""version"": ""0.2.0"",
-                           ""protocol_version"": 6
-                       }
-                    }
-                ";
+            StringBuilder sb = new StringBuilder();
+            StringWriter sw = new StringWriter(sb);
+            using (JsonWriter writer = new JsonTextWriter(sw))
+            {
+                writer.Formatting = Formatting.None;
+                writer.WriteStartObject();
+                writer.WritePropertyName("exception");
+                
+                writer.WriteStartObject();
+                writer.WritePropertyName("exception_class");
+                writer.WriteValue(ExceptionClass ?? "[unknown]");
+                writer.WritePropertyName("message");
+                writer.WriteValue(exception.Message);
+                writer.WritePropertyName("occurred_at");
+                writer.WriteValue("2012-10-23T23:25:19.096616");
+                //writer.WriteValue(exceptionTime.ToString());
+                writer.WriteEndObject();
+                
+                writer.WriteEndObject();
+            }
+            return sb.ToString();
+            //return @"{""exception"": {""exception_class"": ""Exception"", ""message"": ""Test exception form marko!!!!"", ""occurred_at"": ""2012-10-23T23:25:19.096616""}}";
         }
     }
 }
