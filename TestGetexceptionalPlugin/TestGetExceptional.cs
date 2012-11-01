@@ -13,7 +13,7 @@ namespace TestGetexceptionalPlugin
     [TestClass]
     public class TestGetExceptional
     {
-        private const string API_KEY = "aebdf951ce97b0535a3659f8c0c3934424d8b9e5";
+        private const string API_KEY = "1c7298dc11019c1d00caa5c1683a4679905ca8dd";
 
         private GetExceptional exSender;
 

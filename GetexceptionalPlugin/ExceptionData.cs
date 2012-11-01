@@ -16,11 +16,12 @@ namespace GetexceptionalPlugin
         private Exception exception;
         private HttpRequest request;
         private HttpSessionState session;
-        private DateTime exceptionTime = DateTime.Now.ToUniversalTime();
+        private DateTime exceptionTime;
 
         public ExceptionData(Exception ex)
         {
             exception = ex;
+            exceptionTime = DateTime.Now.ToUniversalTime();
         }
 
         public ExceptionData(Exception ex, HttpRequest req)
@@ -45,143 +46,6 @@ namespace GetexceptionalPlugin
             }
         }
 
-        /// <summary>
-        /// Given an HTTP Request and an Exception, turns it into XML in a format that 
-        /// getexceptional.com can consume
-        /// </summary>
-        /// <param name="ex">Exception you want to report</param>
-        /// <param name="req">Request during which the exception was thrown.  This can be
-        ///                   null, so that you cann use this in non-web environments.
-        ///                   </param>
-        /// <returns></returns>
-        public string ToXml()
-        {
-            string controller = "[no controller]";
-            string action = "[no action]";
-            string root = "[no root]";
-            string url = "[no url]";
-
-            //create a new copy of the servervariables because sometimes they can change during the 
-            //iteration of them, which causes errors
-            NameValueCollection serverVariables = null;
-            try
-            {
-                if (request != null) 
-                    serverVariables = new NameValueCollection(request.ServerVariables);
-            }
-            catch (Exception)
-            {
-                //I have seen occasions where IIS throws exceptions accessing server variables
-#if DEBUG
-                throw;
-#endif
-            }
-
-            if (request != null)
-            {
-                action = request.FilePath;
-                if (null != serverVariables) controller = serverVariables["HTTP_HOST"];
-                root = request.ApplicationPath;
-                url = (null != request.Url) ? request.Url.ToString() : "";
-            }
-
-
-
-            string exceptionMessage = "[no message]";
-            string exceptionStack = "[no stack trace]";
-            if (exception != null)
-            {
-                exceptionMessage = exception.Message;
-                exceptionStack = exception.StackTrace;
-            }
-
-            //do this with a stringbuilder instead of XML tools (ex. LINQ) for the sake of speed.
-            StringBuilder sb = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-            sb.Append("<error>\n");
-            sb.Append("\t<controller_name>");
-            sb.Append(controller);
-            sb.Append("</controller_name>\n");
-            sb.Append("\t<action_name>");
-            sb.Append(action);
-            sb.Append("</action_name>\n");
-            sb.Append("\t<error_class>");
-            sb.Append(ExceptionClass ?? "[unknown]");
-            sb.Append("</error_class>\n");
-            sb.Append("\t<message>");
-            sb.Append(XMLEscape(exceptionMessage));
-            sb.Append("</message>\n");
-            sb.Append("\t<backtrace>");
-            sb.Append(XMLEscape(exceptionStack));
-            sb.Append("</backtrace>\n");
-            sb.Append("\t<occurred_at>");
-            sb.Append(exceptionTime.ToString());
-            sb.Append("</occurred_at>\n");
-            sb.Append("\t<rails_root>");
-            sb.Append(root);
-            sb.Append("</rails_root>\n");
-            sb.Append("\t<url>");
-            sb.Append(XMLEscape(url));
-            sb.Append("</url>\n");
-            sb.Append("\t<environment>\n");
-            if (serverVariables != null)
-                AppendXML(serverVariables, sb);
-            sb.Append("</environment>\n");
-            sb.Append("\t<session>\n");
-            if (session != null)
-            {
-                System.Collections.IEnumerator ie = session.GetEnumerator();
-                string currentSessionItemName = "";
-                string currentSessionItemValue = "";
-                try
-                {
-                    while (ie.MoveNext())
-                    {
-                        currentSessionItemName = (string)ie.Current;
-                        currentSessionItemValue = (null == session[currentSessionItemName]) ? "NULL" : session[currentSessionItemName].ToString();
-                        AppendXML(currentSessionItemName, currentSessionItemValue, sb);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    AppendXML("ExceptionalException", ex.Message, sb);
-                }
-            }
-            sb.Append("</session>\n");
-            sb.Append("\t<parameters>\n");
-            if (null != request && null != request.QueryString) ExceptionData.AppendXML(request.QueryString, sb);
-            if (null != request && null != request.Form) ExceptionData.AppendXML(request.Form, sb);
-            sb.Append("</parameters>\n");
-            sb.Append("</error>");
-
-            return sb.ToString();
-        }
-
-
-        //Appends a NameValueCollection to a StringBuilder as XML
-        private static void AppendXML(NameValueCollection nvc, StringBuilder sb)
-        {
-            if (nvc == null)
-                return;
-            foreach (string key in nvc.Keys) { 
-                AppendXML(key, nvc[key], sb); 
-            }
-        }
-
-        //Turns the name into a tag, and makes the value it's inner text, and appends to the stringbuilder
-        private static void AppendXML(string name, string value, StringBuilder sb)
-        {
-            if (name == null || value == null) 
-                return;
-            sb.Append("<"); sb.Append(name); sb.Append(">");
-            sb.Append(ExceptionData.XMLEscape(value));
-            sb.Append("</"); sb.Append(name); sb.Append(">\n");
-        }
-
-        private static string XMLEscape(string text)
-        {
-            return SecurityElement.Escape(text);
-        }
-
         public string ToJson()
         {
             StringBuilder sb = new StringBuilder();
@@ -190,22 +54,151 @@ namespace GetexceptionalPlugin
             {
                 writer.Formatting = Formatting.None;
                 writer.WriteStartObject();
-                writer.WritePropertyName("exception");
-                
-                writer.WriteStartObject();
-                writer.WritePropertyName("exception_class");
-                writer.WriteValue(ExceptionClass ?? "[unknown]");
-                writer.WritePropertyName("message");
-                writer.WriteValue(exception.Message);
-                writer.WritePropertyName("occurred_at");
-                writer.WriteValue("2012-10-23T23:25:19.096616");
-                //writer.WriteValue(exceptionTime.ToString());
-                writer.WriteEndObject();
-                
+                ToJsonEnvironmentInfo(writer);
+                ToJsonRequestInfo(writer);
+                ToJsonExceptionInfo(writer);
                 writer.WriteEndObject();
             }
             return sb.ToString();
-            //return @"{""exception"": {""exception_class"": ""Exception"", ""message"": ""Test exception form marko!!!!"", ""occurred_at"": ""2012-10-23T23:25:19.096616""}}";
+        }
+
+        private void ToJsonExceptionInfo(JsonWriter writer)
+        {
+            writer.WritePropertyName("exception");
+
+            writer.WriteStartObject();
+            writer.WritePropertyName("exception_class");
+            writer.WriteValue(ExceptionClass ?? "[unknown]");
+            writer.WritePropertyName("message");
+            writer.WriteValue(exception.Message);
+            writer.WritePropertyName("occurred_at");
+            
+            
+            writer.WriteValue(exceptionTime.ToString("yyyy-MM-ddTHH:mm:ss.ffffff"));
+            writer.WritePropertyName("backtrace");
+            writer.WriteStartArray();
+            string stackTrace = exception.StackTrace;
+            writer.WriteValue(stackTrace);
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        private void ToJsonRequestInfo(JsonWriter writer)
+        {
+            writer.WritePropertyName("request");
+
+            writer.WriteStartObject();
+            if ( session != null)
+            {
+                writer.WritePropertyName("session");
+                writer.WriteStartObject();
+                System.Collections.IEnumerator ie = session.GetEnumerator();
+                try
+                {
+                    while (ie.MoveNext())
+                    {
+                        string key = (string)ie.Current;
+                        string value = (session[key] == null) ? "NULL" : session[key].ToString();
+                        writer.WritePropertyName(key);
+                        writer.WriteValue(value);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    writer.WritePropertyName("ExceptionalException");
+                    writer.WriteValue(ex.Message);
+                }
+                writer.WriteEndObject();
+            }
+            if (request != null)
+            {
+                writer.WritePropertyName("remote_ip");
+                writer.WriteValue(request.UserHostAddress);
+
+                NameValueCollection serverVariables = request.ServerVariables;
+                writer.WritePropertyName("controller");
+                writer.WriteValue(serverVariables["HTTP_HOST"]);
+                writer.WritePropertyName("action");
+                writer.WriteValue(request.FilePath);
+                writer.WritePropertyName("url");
+                writer.WriteValue(request.Url.ToString());
+
+                writer.WritePropertyName("parameters");
+                writer.WriteStartObject();
+                if (request.QueryString != null)
+                {
+                    writer.WritePropertyName("queryString");
+                    writer.WriteValue(serverVariables["HTTP_HOST"]);
+                }
+                if (request.Form != null)
+                {
+                    NameValueCollection formParameters = request.Form;
+                    foreach (String key in formParameters)
+                    {
+                        writer.WritePropertyName(key);
+                        writer.WriteValue(formParameters[key]);
+                    }
+                }
+                writer.WriteEndObject();
+
+                writer.WritePropertyName("headers");
+                writer.WriteStartObject();
+                NameValueCollection headers = request.Headers;
+                foreach (String key in headers)
+                {
+                    writer.WritePropertyName(key);
+                    writer.WriteValue(headers[key]);
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndObject();
+        }
+
+        private void ToJsonEnvironmentInfo(JsonWriter writer)
+        {
+            writer.WritePropertyName("application_environment");
+
+            writer.WriteStartObject();
+            writer.WritePropertyName("framework");
+            writer.WriteValue(".NET");
+            writer.WritePropertyName("env");
+            writer.WriteStartObject();
+            if (request != null)
+            {
+                NameValueCollection serverVariables = request.ServerVariables;
+                foreach (String key in serverVariables)
+                {
+                    writer.WritePropertyName(key);
+                    writer.WriteValue(serverVariables[key]);
+                }
+            }
+            writer.WriteEndObject();
+            writer.WritePropertyName("language");
+            writer.WriteValue("C#");
+            writer.WritePropertyName("language_version");
+            writer.WriteValue("3.5");
+            writer.WritePropertyName("application_root_directory");
+            if (request != null)
+            {
+                writer.WriteValue(request.ApplicationPath);
+            }
+            else
+            {
+                writer.WriteValue("no-root-path");
+            }
+            
+            writer.WriteEndObject();
+
+            writer.WritePropertyName("client");
+
+            writer.WriteStartObject();
+            writer.WritePropertyName("name");
+            writer.WriteValue("GetExceptionalPlugin.NET");
+            writer.WritePropertyName("version");
+            writer.WriteValue("1.0.0.0");
+            writer.WritePropertyName("protocol_version");
+            writer.WriteValue(6);
+            writer.WriteEndObject();
         }
     }
 }
